@@ -106,7 +106,7 @@ class UnoConverter:
         # No filter found
         return None
 
-    def convert(self, inpath=None, indata=None, outpath=None, convert_to=None):
+    def convert(self, inpath=None, indata=None, outpath=None, convert_to=None, landscape=False):
         """Converts a file from one type to another
 
         inpath: A path (on the local hard disk) to a file to be converted.
@@ -157,6 +157,23 @@ class UnoConverter:
         try:
             # Figure out document type:
             import_type = get_doc_type(document)
+
+            # Custom logic =====
+            # Center document
+            sheets = document.getSheets()
+            for sheet in sheets:
+                pageStyle = document.StyleFamilies.getByName("PageStyles").getByName(sheet.PageStyle)
+                pageStyle.CenterHorizontally = True
+
+                # Set landscape mode
+                if landscape:
+                    pageStyle.IsLandscape = True
+                    # Swap dimension
+                    newWidth = pageStyle.Height
+                    newHeight = pageStyle.Width
+                    pageStyle.Width = newWidth
+                    pageStyle.Height = newHeight
+            # End Custom logic =====
 
             if outpath:
                 export_path = uno.systemPathToFileUrl(os.path.abspath(outpath))
@@ -227,6 +244,9 @@ def main():
     parser.add_argument(
         "--interface", default="127.0.0.1", help="The interface used by the server"
     )
+    parser.add_argument(
+        "--landscape", action="store_true", help="Set the document orientation to landscape mode"
+    )
     parser.add_argument("--port", default="2002", help="The port used by the server")
     args = parser.parse_args()
 
@@ -241,11 +261,13 @@ def main():
         # Get data from stdin
         indata = sys.stdin.buffer.read()
         result = converter.convert(
-            indata=indata, outpath=args.outfile, convert_to=args.convert_to
+            indata=indata, outpath=args.outfile, convert_to=args.convert_to,
+            landscape=args.landscape
         )
     else:
         result = converter.convert(
-            inpath=args.infile, outpath=args.outfile, convert_to=args.convert_to
+            inpath=args.infile, outpath=args.outfile, convert_to=args.convert_to,
+            landscape=args.landscape
         )
 
     if args.outfile is None:
