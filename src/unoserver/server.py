@@ -82,7 +82,7 @@ def main():
 
     # Add UserInstallation flag
     with tempfile.TemporaryDirectory() as tmpuserdir:
-        parser.add_argument("--user-installation", default=tmpuserdir, help="The UserInstallation env used by the server")
+        parser.add_argument("--user-installation", default=tmpuserdir, help="The path to the LibreOffice user profile")
 
     args = parser.parse_args()
 
