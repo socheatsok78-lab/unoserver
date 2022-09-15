@@ -13,52 +13,56 @@ class UnoServer:
     def __init__(self, interface="127.0.0.1", port="2002"):
         self.interface = interface
         self.port = port
+        self.user_installation = ""
 
     def start(self, executable="libreoffice"):
         logger.info("Starting unoserver.")
 
-        with tempfile.TemporaryDirectory() as tmpuserdir:
+        connection = (
+            "socket,host=%s,port=%s,tcpNoDelay=1;urp;StarOffice.ComponentContext"
+            % (self.interface, self.port)
+        )
 
-            connection = (
-                "socket,host=%s,port=%s,tcpNoDelay=1;urp;StarOffice.ComponentContext"
-                % (self.interface, self.port)
-            )
+        # I think only --headless and --norestore are needed for
+        # command line usage, but let's add everything to be safe.
+        cmd = [
+            executable,
+            "--headless",
+            "--invisible",
+            "--nocrashreport",
+            "--nodefault",
+            "--nologo",
+            "--nofirststartwizard",
+            "--norestore",
+            "--language=km-KH",
+            f"--accept={connection}",
+        ]
 
-            # Store this as an attribute, it helps testing
-            self.tmp_uri = "file://" + request.pathname2url(tmpuserdir)
+        if (self.user_installation):
+            cmd.append(f"-env:UserInstallation={self.user_installation}")
 
-            # I think only --headless and --norestore are needed for
-            # command line usage, but let's add everything to be safe.
-            cmd = [
-                executable,
-                "--headless",
-                "--invisible",
-                "--nocrashreport",
-                "--nodefault",
-                "--nologo",
-                "--nofirststartwizard",
-                "--norestore",
-                f"-env:UserInstallation={self.tmp_uri}",
-                f"--accept={connection}",
-            ]
 
-            logger.info("Command: " + " ".join(cmd))
-            process = subprocess.Popen(cmd)
+        logger.info("Command: " + " ".join(cmd))
+        process = subprocess.Popen(cmd)
 
-            def signal_handler(signum, frame):
-                logger.info("Sending signal to LibreOffice")
-                try:
-                    process.send_signal(signum)
-                except ProcessLookupError as e:
-                    # 3 means the process is already dead
-                    if e.errno != 3:
-                        raise
+        def signal_handler(signum, frame):
+            logger.info("Sending signal to LibreOffice")
+            try:
+                process.send_signal(signum)
+            except ProcessLookupError as e:
+                # 3 means the process is already dead
+                if e.errno != 3:
+                    raise
 
-            signal.signal(signal.SIGTERM, signal_handler)
-            signal.signal(signal.SIGHUP, signal_handler)
-            signal.signal(signal.SIGINT, signal_handler)
-            return process
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGHUP, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+        return process
 
+    def setUserInstallationPath(self, path):
+        self.user_installation = "file://" + request.pathname2url(path)
+        logger.info("UserInstallation: " + self.user_installation)
+        return
 
 def main():
     logging.basicConfig()
@@ -75,9 +79,19 @@ def main():
         default="libreoffice",
         help="The path to the LibreOffice executable",
     )
+
+    # Add UserInstallation flag
+    with tempfile.TemporaryDirectory() as tmpuserdir:
+        parser.add_argument("--user-installation", default=tmpuserdir, help="The UserInstallation env used by the server")
+
     args = parser.parse_args()
 
     server = UnoServer(args.interface, args.port)
+
+    # If run in standalone mode
+    # Set the UserInstallation env
+    server.setUserInstallationPath(args.user_installation)
+
     # If it's daemonized, this returns the process.
     # It returns 0 of getting killed in a normal way.
     # Otherwise it returns 1 after the process exits.
