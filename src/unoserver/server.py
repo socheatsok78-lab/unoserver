@@ -61,7 +61,6 @@ class UnoServer:
 
     def setUserInstallationPath(self, path):
         self.user_installation = "file://" + request.pathname2url(path)
-        logger.info("UserInstallation: " + self.user_installation)
         return
 
 def main():
