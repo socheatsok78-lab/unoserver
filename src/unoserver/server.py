@@ -34,7 +34,6 @@ class UnoServer:
             "--nologo",
             "--nofirststartwizard",
             "--norestore",
-            "--language=km-KH",
             f"--accept={connection}",
         ]
 
