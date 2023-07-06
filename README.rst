@@ -20,9 +20,10 @@ and load and convert documents without exiting and reloading the software. This 
 CPU load when converting many documents with somewhere between 50% and 75%, meaning you can
 convert somewhere between two and four times as many documents in the same time using a listener.
 
-Unoserver contains two commands to help you do this, `unoserver` which starts a listener on the
+Unoserver contains three commands to help you do this, `unoserver` which starts a listener on the
 specified IP interface and port, and `unoconverter` which will connect to a listener and ask it
-to convert a document.
+to convert a document, as well as `unocompare` which will connect to a listener and ask it
+to compare two documents and convert the result document.
 
 
 Installation
@@ -81,9 +82,9 @@ example `/Applications/LibreOffice.app/Contents/python`.
 Usage
 -----
 
-Installing unoserver installs two scripts, `unoserver` and `unoconverter`.
-Both can also be run as modules with `python3 -m unoserver.server` and
-`python3 -m unoserver.converter` with the same arguments as the main scripts.
+Installing unoserver installs three scripts, `unoserver`, `unoconverter` and `unocompare`.
+All can also be run as modules with `python3 -m unoserver.server`, `python3 -m unoserver.converter`
+and `python3 -m unoserver.comparer` with the same arguments as the main scripts.
 
 Unoserver
 ~~~~~~~~~
@@ -98,10 +99,23 @@ Unoserver
 Unoconvert
 ~~~~~~~~~~
 
-``unoconvert [-h] [--convert-to CONVERT_TO] [--interface INTERFACE] [--port PORT] infile outfile``
+``unoconvert [-h] [--convert-to CONVERT_TO] [--filter FILTER_NAME] [--interface INTERFACE] [--port PORT] infile outfile``
 
 * `infile`: The path to the file to be converted (use - for stdin)
 * `outfile`: The path to the converted file (use - for stdout)
+* `--convert-to`: The file type/extension of the output file (ex pdf). Required when using stdout
+* `--filter`: The export filter to use when converting. It is selected automatically if not specified.
+* `--interface`: The interface used by the server, defaults to "localhost"
+* `--port`: The port used by the server, defaults to "2002"
+
+Unocompare
+~~~~~~~~~~
+
+``unocompare [-h] [--convert-to CONVERT_TO] [--interface INTERFACE] [--port PORT] infile inorigfile outfile``
+
+* `infile`: The path to the modified file to be compared with the original one (use - for stdin)
+* `inorigfile`: The path to the original file to be compared with the modified one (use - for stdin)
+* `outfile`: The path to the result of the comparison and converted file (use - for stdout)
 * `--convert-to`: The file type/extension of the output file (ex pdf). Required when using stdout
 * `--interface`: The interface used by the server, defaults to "localhost"
 * `--port`: The port used by the server, defaults to "2002"
@@ -135,7 +149,7 @@ for using LibreOffice as a listener to convert documents.
 Differences for the user
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-* Easier install for system versions of LibreOffice. On Linux, the apckaged versions of LibreOffice
+* Easier install for system versions of LibreOffice. On Linux, the packaged versions of LibreOffice
   typically uses the system Python, making it easy to install `unoserver` with a simple
   `sudo pip install unoserver` command.
 

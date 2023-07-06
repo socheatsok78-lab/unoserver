@@ -1,7 +1,27 @@
-1.3 (unreleased)
+1.5 (unreleased)
 ----------------
 
-- Nothing changed yet.
+- Added support for passing in filter options with the --filter-options parameter.
+
+
+1.4 (2023-04-28)
+----------------
+
+- Added new feature: comparing documents and export the result to any format.
+
+- You can run the new module as scripts, and also with ``python3 -m unoserver.comparer`` just
+  like the ``python3 -m unoserver.server`` and ``python3 -m unoserver.converter``.
+
+- Porting feature from previous release: refresh of index in the Table of Contents
+
+
+1.3 (2023-02-03)
+----------------
+
+- Now works on Windows (although it's not officially supported).
+
+- Added --filter argument to unoconverter to allow explicit selection of which
+  export filter to use for conversion.
 
 
 1.2 (2022-03-17)

@@ -14,7 +14,6 @@ import os
 import sys
 import unohelper
 
-from pathlib import Path
 from com.sun.star.beans import PropertyValue
 from com.sun.star.io import XOutputStream
 
@@ -23,14 +22,7 @@ logger = logging.getLogger("unoserver")
 SFX_FILTER_IMPORT = 1
 SFX_FILTER_EXPORT = 2
 DOC_TYPES = {
-    "com.sun.star.sheet.SpreadsheetDocument",
-    "com.sun.star.text.TextDocument",
-    "com.sun.star.presentation.PresentationDocument",
-    "com.sun.star.drawing.DrawingDocument",
-    "com.sun.star.sdb.DocumentDataSource",
-    "com.sun.star.formula.FormulaProperties",
-    "com.sun.star.script.BasicIDE",
-    "com.sun.star.text.WebDocument",  # Supposedly deprecated? But still around.
+    "com.sun.star.text.TextDocument",  # Only support comparing for writer
 }
 
 
@@ -43,11 +35,11 @@ def get_doc_type(doc):
         if doc.supportsService(t):
             return t
 
-    # LibreOffice opened it, but it's not one of the known document types.
+    # LibreOffice opened it, but it's not one of the supported document types.
     # This really should only happen if a future version of LibreOffice starts
     # adding document types, which seems unlikely.
     raise RuntimeError(
-        "The input document is of an unknown document type. This is probably a bug.\n"
+        "The input document is an unsupported document type for comparing.\n"
         "Please create an issue at https://github.com/unoconv/unoserver."
     )
 
@@ -63,9 +55,9 @@ class OutputStream(unohelper.Base, XOutputStream):
         self.buffer.write(seq.value)
 
 
-class UnoConverter:
+class UnoComparer:
     def __init__(self, interface="127.0.0.1", port="2002"):
-        logger.info("Starting unoconverter.")
+        logger.info("Starting UnoComparer.")
 
         self.local_context = uno.getComponentContext()
         self.resolver = self.local_context.ServiceManager.createInstanceWithContext(
@@ -85,8 +77,38 @@ class UnoConverter:
             "com.sun.star.document.TypeDetection", self.context
         )
 
+    def is_comparable(self, import_type, importOrg_type):
+        # List export filters. You can only search on module, iflags and eflags,
+        # so the import and export types we have to test in a loop
+        export_filters = self.filter_service.createSubSetEnumerationByQuery(
+            "getSortedFilterList():iflags=2"
+        )
+
+        while export_filters.hasMoreElements():
+            # Filter by Filtername here
+            export_filter = prop2dict(export_filters.nextElement())
+            if export_filter["Type"] != importOrg_type:
+                continue
+            if export_filter["DocumentService"] != import_type:
+                continue
+
+            # There is only one possible DocumentService per import and export type,
+            # so the first one we find is correct
+            return True
+
+        # No DocumentService found
+        return False
+
     def find_filter(self, import_type, export_type):
-        for export_filter in self.get_available_export_filters():
+        # List export filters. You can only search on module, iflags and eflags,
+        # so the import and export types we have to test in a loop
+        export_filters = self.filter_service.createSubSetEnumerationByQuery(
+            "getSortedFilterList():iflags=2"
+        )
+
+        while export_filters.hasMoreElements():
+            # Filter DocumentService here
+            export_filter = prop2dict(export_filters.nextElement())
             if export_filter["DocumentService"] != import_type:
                 continue
             if export_filter["Type"] != export_type:
@@ -99,70 +121,45 @@ class UnoConverter:
         # No filter found
         return None
 
-    def get_available_export_filters(self):
-        # List export filters. You can only search on module, iflags and eflags,
-        # so the import and export types we have to test in a loop
-        export_filters = self.filter_service.createSubSetEnumerationByQuery(
-            "getSortedFilterList():iflags=2"
-        )
-
-        while export_filters.hasMoreElements():
-            # Filter DocumentService here
-            yield prop2dict(export_filters.nextElement())
-
-    def get_available_filter_names(self):
-        return [filter["Name"] for filter in self.get_available_export_filters()]
-
-    def convert(
-        self,
-        inpath=None,
-        indata=None,
-        outpath=None,
-        convert_to=None,
-        filtername=None,
-        filter_options=[],
-        update_index=True,
-        landscape=False,
+    def compare(
+        self, inpath=None, indata=None, inOrgpath=None, outpath=None, convert_to=None
     ):
-        """Converts a file from one type to another
+        """Compare two files and convert the result from one type to another.
 
-        inpath: A path (on the local hard disk) to a file to be converted.
+        inpath: A path (on the local hard disk) to a file to be compared.
+        inOrgpath: A path (on the local hard disk) to another file to be compared.
 
-        indata: A byte string containing the file content to be converted.
+        indata: A byte string containing the file content to be compared.
 
         outpath: A path (on the local hard disk) to store the result, or None, in which case
                  the content of the converted file will be returned as a byte string.
 
         convert_to: The extension of the desired file type, ie "pdf", "xlsx", etc.
-
-        filtername: The name of the export filter to use for conversion. If None, it is auto-detected.
-
-        update_index: Updates the index before conversion
         """
         if inpath is None and indata is None:
-            raise RuntimeError("Nothing to convert.")
+            raise RuntimeError("Nothing to be compared.")
 
         if inpath is not None and indata is not None:
             raise RuntimeError("You can only pass in inpath or indata, not both.")
+
+        if inOrgpath is None:
+            raise RuntimeError("Nothing to be compared with.")
 
         if outpath is None and convert_to is None:
             raise RuntimeError(
                 "If you don't specify an output path, you must specify a file-type."
             )
 
-        input_props = (PropertyValue(Name="ReadOnly", Value=True),)
+        input_props = (PropertyValue(Name="Hidden", Value=True),)
 
         if inpath:
             # TODO: Verify that inpath exists and is openable, and that outdir exists, because uno's
             # exceptions are completely useless!
 
-            if not Path(inpath).exists():
-                raise RuntimeError(f"Path {inpath} does not exist.")
-
             # Load the document
             import_path = uno.systemPathToFileUrl(os.path.abspath(inpath))
             # This returned None if the file was locked, I'm hoping the ReadOnly flag avoids that.
-            logger.info(f"Opening {inpath}")
+            logger.info(f"Opening file {inpath}")
 
         elif indata:
             # The document content is passed in as a byte string
@@ -174,47 +171,40 @@ class UnoConverter:
             import_path = "private:stream"
 
         document = self.desktop.loadComponentFromURL(
-            import_path, "_default", 0, input_props
+            import_path, "_blank", 0, input_props
         )
 
-        if update_index:
-            # Update document indexes
-            for ii in range(2):
-                # At first, update Table-of-Contents.
-                # ToC grows, so page numbers grow too.
-                # On second turn, update page numbers in ToC.
-                try:
-                    document.refresh()
-                    indexes = document.getDocumentIndexes()
-                except AttributeError:
-                    # The document doesn't implement the XRefreshable and/or
-                    # XDocumentIndexesSupplier interfaces
-                    break
-                else:
-                    for i in range(0, indexes.getCount()):
-                        indexes.getByIndex(i).update()
+        # TODO: Verify that inOrgpath exists and is openable, and that outdir exists, because uno's
+        # exceptions are completely useless!
 
-        # Now do the conversion
+        # Load the original document
+        importOrg_path = uno.systemPathToFileUrl(os.path.abspath(inOrgpath))
+        inputOrg_props = (PropertyValue(Name="URL", Value=importOrg_path),)
+        inputOrg_props += (PropertyValue(Name="NoAcceptDialog", Value=True),)
+        logger.info(f"Opening original file {inOrgpath}")
+
+        # Now do the comparison, then the conversion
         try:
-            # Figure out document type:
+            # Figure out document type of import file:
             import_type = get_doc_type(document)
+            # Figure out document type of original import file:
+            importOrg_type = self.type_service.queryTypeByURL(importOrg_path)
+            # check that the two type is same
+            isComparable = self.is_comparable(import_type, importOrg_type)
 
-            # Custom logic =====
-            # Center document
-            sheets = document.getSheets()
-            for sheet in sheets:
-                pageStyle = document.StyleFamilies.getByName("PageStyles").getByName(sheet.PageStyle)
-                pageStyle.CenterHorizontally = True
+            if not isComparable:
+                raise RuntimeError("Cannot compare two different type of document!")
 
-                # Set landscape mode
-                if landscape:
-                    pageStyle.IsLandscape = True
-                    # Swap dimension
-                    newWidth = pageStyle.Height
-                    newHeight = pageStyle.Width
-                    pageStyle.Width = newWidth
-                    pageStyle.Height = newHeight
-            # End Custom logic =====
+            dispatch_helper = self.service.createInstanceWithContext(
+                "com.sun.star.frame.DispatchHelper", self.context
+            )
+            dispatch_helper.executeDispatch(
+                document.getCurrentController().getFrame(),
+                ".uno:CompareDocuments",
+                "",
+                0,
+                inputOrg_props,
+            )
 
             if outpath:
                 export_path = uno.systemPathToFileUrl(os.path.abspath(outpath))
@@ -238,32 +228,15 @@ class UnoConverter:
                     f"Unknown export file type, unknown extension '{extension}'"
                 )
 
-            if filtername is not None:
-                available_filter_names = self.get_available_filter_names()
-                if filtername not in available_filter_names:
-                    raise RuntimeError(
-                        f"'{filtername}' is not a valid filter name. Valid filters are {available_filter_names}"
-                    )
-            else:
-                filtername = self.find_filter(import_type, export_type)
-                if filtername is None:
-                    raise RuntimeError(
-                        f"Could not find an export filter from {import_type} to {export_type}"
-                    )
+            filtername = self.find_filter(import_type, export_type)
+            if filtername is None:
+                raise RuntimeError(
+                    f"Could not find an export filter from {import_type} to {export_type}"
+                )
 
             logger.info(f"Exporting to {outpath}")
             logger.info(f"Using {filtername} export filter")
 
-            filter_data = []
-            for option in filter_options:
-                option_name, option_value = option.split("=", maxsplit=1)
-                if option_value == "false":
-                    option_value = False
-                elif option_value == "true":
-                    option_value = True
-                elif option_value.isdecimal():
-                    option_value = int(option_value)
-                filter_data.append(PropertyValue(Name=option_name, Value=option_value))
             output_props = (
                 PropertyValue(Name="FilterName", Value=filtername),
                 PropertyValue(Name="Overwrite", Value=True),
@@ -273,16 +246,8 @@ class UnoConverter:
                 output_props += (
                     PropertyValue(Name="OutputStream", Value=output_stream),
                 )
-            if filter_data:
-                output_props += (
-                    PropertyValue(
-                        Name="FilterData",
-                        Value=uno.Any(
-                            "[]com.sun.star.beans.PropertyValue", tuple(filter_data)
-                        ),
-                    ),
-                )
             document.storeToURL(export_path, output_props)
+            document.dispose()
 
         finally:
             document.close(True)
@@ -297,49 +262,30 @@ def main():
     logging.basicConfig()
     logger.setLevel(logging.DEBUG)
 
-    parser = argparse.ArgumentParser("unoconvert")
+    parser = argparse.ArgumentParser("unocompare")
     parser.add_argument(
-        "infile", help="The path to the file to be converted (use - for stdin)"
+        "infile",
+        help="The path to the modified file to be compared with the original one (use - for stdin)",
     )
     parser.add_argument(
-        "outfile", help="The path to the converted file (use - for stdout)"
+        "inOrigfile",
+        help="The path to the original file to be compared with the modified one (use - for stdin)",
+    )
+    parser.add_argument(
+        "outfile",
+        help="The path to the result of the comparison and converted file (use - for stdout)",
     )
     parser.add_argument(
         "--convert-to",
         help="The file type/extension of the output file (ex pdf). Required when using stdout",
     )
     parser.add_argument(
-        "--filter",
-        default=None,
-        help="The export filter to use when converting. It is selected automatically if not specified.",
-    )
-    parser.add_argument(
-        "--filter-options",
-        default=[],
-        action="append",
-        help="Options for the export filter, in name=value format. Use true/false for boolean values.",
-    )
-    parser.add_argument(
-        "--update-index",
-        action="store_true",
-        help="Updes the indexes before conversion. Can be time consuming.",
-    )
-    parser.add_argument(
-        "--dont-update-index",
-        action="store_false",
-        dest="update_index",
-        help="Skip updating the indexes.",
-    )
-    parser.set_defaults(update_index=True)
-    parser.add_argument(
         "--interface", default="127.0.0.1", help="The interface used by the server"
-    )
-    parser.add_argument(
-        "--landscape", action="store_true", help="Set the document orientation to landscape mode"
     )
     parser.add_argument("--port", default="2002", help="The port used by the server")
     args = parser.parse_args()
-    converter = UnoConverter(args.interface, args.port)
+
+    comparer = UnoComparer(args.interface, args.port)
 
     if args.outfile == "-":
         # Set outfile to None, to get the data returned from the function,
@@ -349,24 +295,18 @@ def main():
     if args.infile == "-":
         # Get data from stdin
         indata = sys.stdin.buffer.read()
-        result = converter.convert(
+        result = comparer.compare(
             indata=indata,
+            inOrgpath=args.inOrigfile,
             outpath=args.outfile,
             convert_to=args.convert_to,
-            filtername=args.filter,
-            filter_options=args.filter_options,
-            update_index=args.update_index,
-            landscape=args.landscape,
         )
     else:
-        result = converter.convert(
+        result = comparer.compare(
             inpath=args.infile,
+            inOrgpath=args.inOrigfile,
             outpath=args.outfile,
             convert_to=args.convert_to,
-            filtername=args.filter,
-            filter_options=args.filter_options,
-            update_index=args.update_index,
-            landscape=args.landscape,
         )
 
     if args.outfile is None:

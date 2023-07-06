@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import tempfile
+import platform
 from urllib import request
 
 logger = logging.getLogger("unoserver")
@@ -54,8 +55,12 @@ class UnoServer:
                     raise
 
         signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGHUP, signal_handler)
         signal.signal(signal.SIGINT, signal_handler)
+
+        # Signal SIGHUP is available only in Unix systems
+        if platform.system() != "Windows":
+            signal.signal(signal.SIGHUP, signal_handler)
+
         return process
 
     def setUserInstallationPath(self, path):
@@ -94,9 +99,12 @@ def main():
     # It returns 0 of getting killed in a normal way.
     # Otherwise it returns 1 after the process exits.
     process = server.start(executable=args.executable)
+    pid = process.pid
+
+    logger.info(f"Server PID: {pid}")
+
     if args.daemon:
         return process
-    pid = process.pid
 
     process.wait()
 

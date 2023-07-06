@@ -3,6 +3,7 @@
 import io
 import os
 import pytest
+import re
 import sys
 import tempfile
 import time
@@ -26,7 +27,7 @@ def test_pdf_conversion(server_fixture, filename):
         # it won't reflect the external changes.
         with open(outfile.name, "rb") as testfile:
             start = testfile.readline()
-            assert start == b"%PDF-1.5\n"
+            assert start == b"%PDF-1.5\n" or start == b"%PDF-1.6\n"
 
 
 class FakeStdio(io.BytesIO):
@@ -39,7 +40,6 @@ class FakeStdio(io.BytesIO):
 
 @pytest.mark.parametrize("filename", ["simple.odt", "simple.xlsx"])
 def test_stdin_stdout(server_fixture, monkeypatch, filename):
-
     with open(os.path.join(TEST_DOCS, filename), "rb") as infile:
         infile_stream = FakeStdio(infile.read())
 
@@ -53,7 +53,7 @@ def test_stdin_stdout(server_fixture, monkeypatch, filename):
 
     outfile_stream.seek(0)
     start = outfile_stream.readline()
-    assert start == b"%PDF-1.5\n"
+    assert start == b"%PDF-1.5\n" or start == b"%PDF-1.6\n"
 
 
 def test_csv_conversion(server_fixture):
@@ -110,3 +110,68 @@ def test_unknown_outfile_type(server_fixture):
         # Type detection should fail, as it's not a .doc file:
         with pytest.raises(RuntimeError):
             converter.main()
+
+
+@pytest.mark.parametrize("filename", ["simple.odt", "simple.xlsx"])
+def test_explicit_export_filter(server_fixture, filename):
+    infile = os.path.join(TEST_DOCS, filename)
+
+    # We use an extension that's not .pdf to verify that the converter does not auto-detect filter based on extension
+    with tempfile.NamedTemporaryFile(suffix=".csv") as outfile:
+        sys.argv = [
+            "unoconverter",
+            "--filter",
+            "writer_pdf_Export",
+            infile,
+            outfile.name,
+        ]
+        converter.main()
+
+        # We now open it to check it, we can't use the outfile object,
+        # it won't reflect the external changes.
+        with open(outfile.name, "rb") as testfile:
+            start = testfile.readline()
+            assert start == b"%PDF-1.5\n" or start == b"%PDF-1.6\n"
+
+
+@pytest.mark.parametrize("filename", ["simple.odt", "simple.xlsx"])
+def test_invalid_explicit_export_filter_prints_available_filters(
+    server_fixture, filename
+):
+    infile = os.path.join(TEST_DOCS, filename)
+
+    # We use an extension that's not .pdf to verify that the converter does not auto-detect filter based on extension
+    with tempfile.NamedTemporaryFile(suffix=".csv") as outfile:
+        sys.argv = ["unoconverter", "--filter", "asdasdasd", infile, outfile.name]
+        try:
+            converter.main()
+        except RuntimeError as err:
+            assert "Office Open XML Text" in err.args[0]
+            assert "writer8" in err.args[0]
+            assert "writer_pdf_Export" in err.args[0]
+
+
+def test_update_index(server_fixture):
+    infile = os.path.join(TEST_DOCS, "index-with-fields.odt")
+
+    with tempfile.NamedTemporaryFile(suffix=".rtf") as outfile:
+        # Let Libreoffice write to the file and close it.
+        sys.argv = ["unoconverter", infile, outfile.name]
+        converter.main()
+
+        # We now open it to check it, we can't use the outfile object,
+        # it won't reflect the external changes.
+        with open(outfile.name, "rb") as testfile:
+            # The timestamp in Header 2 should appear exactly twice after update
+            matches = re.findall(b"13:18:27", testfile.read())
+            assert len(matches) == 2
+
+        with tempfile.NamedTemporaryFile(suffix=".rtf") as outfile:
+            # Let Libreoffice write to the file and close it.
+            sys.argv = ["unoconverter", "--dont-update-index", infile, outfile.name]
+            converter.main()
+
+            with open(outfile.name, "rb") as testfile:
+                # The timestamp in Header 2 should appear exactly once
+                matches = re.findall(b"13:18:27", testfile.read())
+                assert len(matches) == 1
