@@ -5,16 +5,24 @@ import signal
 import subprocess
 import tempfile
 import platform
-from urllib import request
+from pathlib import Path
 
 logger = logging.getLogger("unoserver")
 
 
 class UnoServer:
-    def __init__(self, interface="127.0.0.1", port="2002"):
+    def __init__(self, interface="127.0.0.1", port="2002", user_installation=None):
         self.interface = interface
         self.port = port
-        self.user_installation = ""
+
+        if user_installation is None:
+            with tempfile.TemporaryDirectory() as tmpuserdir:
+                # Store this as an attribute, it helps testing
+                # In windows if the path is invalid causes bootstrap.ini strange corrupt error
+                self.tmp_uri = Path(tmpuserdir).as_uri()
+                self.user_installation = self.tmp_uri
+        else:
+            self.user_installation = Path(user_installation).as_uri()
 
     def start(self, executable="libreoffice"):
         logger.info("Starting unoserver.")
@@ -35,12 +43,9 @@ class UnoServer:
             "--nologo",
             "--nofirststartwizard",
             "--norestore",
+            f"-env:UserInstallation={self.user_installation}",
             f"--accept={connection}",
         ]
-
-        if (self.user_installation):
-            cmd.append(f"-env:UserInstallation={self.user_installation}")
-
 
         logger.info("Command: " + " ".join(cmd))
         process = subprocess.Popen(cmd)
@@ -63,9 +68,6 @@ class UnoServer:
 
         return process
 
-    def setUserInstallationPath(self, path):
-        self.user_installation = "file://" + request.pathname2url(path)
-        return
 
 def main():
     logging.basicConfig()
@@ -82,18 +84,18 @@ def main():
         default="libreoffice",
         help="The path to the LibreOffice executable",
     )
-
-    # Add UserInstallation flag
-    with tempfile.TemporaryDirectory() as tmpuserdir:
-        parser.add_argument("--user-installation", default=tmpuserdir, help="The path to the LibreOffice user profile")
-
+    parser.add_argument(
+        "--user-installation",
+        default=None,
+        help="The path to the LibreOffice user profile"
+    )
     args = parser.parse_args()
 
-    server = UnoServer(args.interface, args.port)
-
-    # If run in standalone mode
-    # Set the UserInstallation env
-    server.setUserInstallationPath(args.user_installation)
+    server = UnoServer(
+        args.interface,
+        args.port,
+        args.user_installation,
+    )
 
     # If it's daemonized, this returns the process.
     # It returns 0 of getting killed in a normal way.
